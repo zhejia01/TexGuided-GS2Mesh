@@ -1,4 +1,4 @@
-# Texture-Guided-Remeshing
+# Texture-Guided-GS2Mesh
 
 ## Environment Setup
 1. Install CUDA SDK:
