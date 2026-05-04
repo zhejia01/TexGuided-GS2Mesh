@@ -60,4 +60,4 @@ ${YOUR_RAW_DATA_PATH}
 
 ## Checklist
 - [x] Release the refinement code
-- [ ] Release the relighting and deformation code
+- [x] Release the relighting and deformation code
