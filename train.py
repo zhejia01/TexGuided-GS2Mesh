@@ -30,6 +30,35 @@ def make_grid(arr, ncols=2):
     assert n == nrows*ncols
     return arr.reshape(nrows, ncols, height, width, nc).swapaxes(1,2).reshape(height*nrows, width*ncols, nc)
 
+def normalize_feature_maps(feature_maps, eps=1e-8):
+    feature_min = feature_maps.amin(dim=(1, 2), keepdim=True)
+    feature_max = feature_maps.amax(dim=(1, 2), keepdim=True)
+    return (feature_maps - feature_min) / (feature_max - feature_min).clamp_min(eps)
+
+def fft_energy_from_rgb(rgb_images, high_pass_cutoff=0.08):
+    rgb_images = rgb_images.float()
+    if rgb_images.max() > 1.0:
+        rgb_images = rgb_images / 255.0
+    gray_images = 0.299 * rgb_images[..., 0] + 0.587 * rgb_images[..., 1] + 0.114 * rgb_images[..., 2]
+    spectrum = torch.fft.fft2(gray_images, dim=(-2, -1), norm='ortho')
+    height, width = gray_images.shape[-2:]
+    freq_y = torch.fft.fftfreq(height, dtype=gray_images.dtype, device=gray_images.device).view(height, 1)
+    freq_x = torch.fft.fftfreq(width, dtype=gray_images.dtype, device=gray_images.device).view(1, width)
+    radius = torch.sqrt(freq_y.square() + freq_x.square())
+    high_pass = (radius >= high_pass_cutoff).to(spectrum.dtype)
+    high_frequency = torch.fft.ifft2(spectrum * high_pass, dim=(-2, -1), norm='ortho')
+    return normalize_feature_maps(high_frequency.abs())
+
+def build_fft_guidance(rgb_images, mask, fft_mode, high_pass_cutoff):
+    if fft_mode == 'zero':
+        fft_gt = torch.zeros_like(rgb_images[..., 0], dtype=torch.float32)
+    elif fft_mode == 'rgb':
+        fft_gt = fft_energy_from_rgb(rgb_images, high_pass_cutoff=high_pass_cutoff)
+        fft_gt = fft_gt * mask[..., 0].float()
+    else:
+        raise ValueError(f'Unsupported fft_mode: {fft_mode}')
+    return fft_gt.to('cuda')
+
 def run_remeshgs(max_iter          = 5000,
              out_dir           = 'exp',
              use_opengl        = False,
@@ -39,7 +68,9 @@ def run_remeshgs(max_iter          = 5000,
              depth_w           = 1.,
              normal_w          = 1.,
              rgb_w             = 1.,
-             camera            = None):
+             camera            = None,
+             fft_mode          = 'rgb',
+             fft_high_pass_cutoff = 0.08):
 
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
@@ -74,7 +105,6 @@ def run_remeshgs(max_iter          = 5000,
     images = []
     gtfile = 'images'
     visfile = 'vis'
-    fftfile = 'fft'
 
     images = []
     for filename in images_name:
@@ -85,8 +115,10 @@ def run_remeshgs(max_iter          = 5000,
     images = torch.stack([torch.tensor(np.array(image)) for image in images])              
     print(images.shape)
     color_gt = images[...,:3] / 255.0                                                                                              
-    mask = (images[...,[3]] / 255.0)
+    alpha = images[...,[3]] if images.shape[-1] > 3 else torch.full_like(images[...,[0]], 255)
+    mask = (alpha / 255.0)
     color_gt[mask.expand_as(color_gt)==0] = 0
+    fft_gt = build_fft_guidance(images[...,:3], mask, fft_mode, fft_high_pass_cutoff)
     color_gt = color_gt.detach().numpy()
 
     images = []
@@ -114,14 +146,6 @@ def run_remeshgs(max_iter          = 5000,
     depth_max = depth_gt.max()
     depth_min = depth_gt[depth_gt>1e-10].min()
     depth_gt = (depth_gt - depth_min) / (depth_max - depth_min)
-    images = []
-    for filename in images_name:
-        image_name = filename.split('.')[0] + '_frequency_energy.png.npy'
-        image_path = os.path.join(os.path.join(input,fftfile), image_name)
-        image = np.load(image_path)
-        images.append(image)
-    images = torch.stack([torch.tensor(np.array(image)) for image in images]).to('cuda')              
-    fft_gt = (images - images.min()) / (images.max() - images.min())                    
 
     mv = torch.Tensor(mv).float().cuda()
     r_mvp = torch.matmul(proj, mv)
@@ -284,6 +308,8 @@ def main():
     parser.add_argument('--normal_w', type=float, default=1.)
     parser.add_argument('--rgb_w', type=float, default=1.)
     parser.add_argument('--camera', type=str)
+    parser.add_argument('--fft-mode', choices=['zero', 'rgb'], default='rgb', help='zero uses a full-zero guidance map; rgb extracts a high-frequency energy map from RGB images with FFT')
+    parser.add_argument('--fft-high-pass-cutoff', type=float, default=0.08, help='normalized high-pass cutoff for --fft-mode rgb')
 
     args = parser.parse_args()
 
@@ -298,7 +324,9 @@ def main():
         depth_w=args.depth_w,
         normal_w=args.normal_w,
         rgb_w=args.rgb_w,
-        camera=args.camera
+        camera=args.camera,
+        fft_mode=args.fft_mode,
+        fft_high_pass_cutoff=args.fft_high_pass_cutoff
     )
 
 

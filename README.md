@@ -26,18 +26,36 @@ pip install .
 
 ## Refinement
 ``` bash
-python train.py --input ${YOUR_INITIAL_MESH_PATH}/train/ours_30000 --camera ${YOUR_RAW_DATA_PATH} --output ${OUTPUT_PATH} --normal_w 0.3 --rgb_w 3.0 --depth_w 0.3
+python train.py --input ${YOUR_INITIAL_MESH_PATH}/train/ours_30000 --camera ${YOUR_RAW_DATA_PATH} --output ${OUTPUT_PATH} --normal_w 0.3 --rgb_w 3.0 --depth_w 0.3 --fft-mode rgb
 ```
-YOUR_INITIAL_MESH_PATH should be organized like 
+
+`train.py` supports two texture-guidance map modes:
+
+- `--fft-mode rgb`: extract a single-channel high-frequency energy map directly from each RGB image using FFT. You can tune the normalized high-pass threshold with `--fft-high-pass-cutoff`; the default is `0.08`.
+- `--fft-mode zero`: use a full-zero tensor with the same height and width as each RGB image. This is useful for quickly starting a run without precomputing any FFT files.
+
+For the quick-start zero tensor mode:
+
+``` bash
+python train.py --input ${YOUR_INITIAL_MESH_PATH}/train/ours_30000 --camera ${YOUR_RAW_DATA_PATH} --output ${OUTPUT_PATH} --normal_w 0.3 --rgb_w 3.0 --depth_w 0.3 --fft-mode zero
+```
+
+The input paths should be organized like:
 ```bash
-data_root
+${YOUR_INITIAL_MESH_PATH}
 ├── train/ours_30000
-│   ├── gt 
-│   └── renders
+│   ├── fuse_post.ply
+│   └── vis
+│       ├── normal_<image_name>.png
+│       └── depth_<image_name>.tiff
 ├── ...
 ├─ cfg_args
-├─ fuse_post.ply
 └─ fuse.ply
+
+${YOUR_RAW_DATA_PATH}
+├── images
+│   └── <image_name>.png
+└── ...
 ```
 
 ## Checklist
